@@ -170,6 +170,20 @@ h2 { font-size: clamp(1.5rem, 3vw, 2.2rem); letter-spacing: -.055em; margin: 8px
 .placeholder-play { display: grid; place-items: center; width: 58px; height: 58px; padding-left: 4px; border-radius: 50%; color: #1a1025; background: var(--lime); box-shadow: 0 0 50px rgba(197,255,91,.2); }
 .video-placeholder strong { margin-top: 20px; font-size: 1.2rem; line-height: 1.3; letter-spacing: .04em; }
 .video-placeholder p { max-width: 300px; padding: 0 20px; margin: 10px 0 0; color: #bdb3ce; font-size: .76rem; }
+.dance-video-frame { position: relative; width: 100%; aspect-ratio: 16/9; background: #0a0710; }
+.dance-video-frame iframe { display: block; width: 100%; height: 100%; border: 0; }
+.playlist-status { margin: 0; padding: 14px 17px; color: #bdb3ce; font: .67rem 'DM Mono',monospace; letter-spacing: .06em; }
+.playlist-player-error { margin: 14px 17px 0; padding: 13px 15px; border: 1px solid rgba(255,140,171,.35); border-radius: 10px; background: rgba(255,140,171,.08); }
+.playlist-player-error strong { display: block; color: #ff8cab; font: 700 .64rem 'DM Mono',monospace; letter-spacing: .09em; }
+.playlist-player-error p { margin: 7px 0 10px; color: #e6dcf2; font-size: .78rem; line-height: 1.5; }
+.playlist-now { display: flex; flex-direction: column; gap: 5px; padding: 15px 17px 0; }
+.playlist-now strong { font-size: 1.02rem; line-height: 1.35; }
+.playlist-author { color: #9d8caf; font: .64rem 'DM Mono',monospace; letter-spacing: .07em; }
+.playlist-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 14px 17px 16px; }
+.playlist-controls .primary-button,.playlist-controls .secondary-button { flex: 1 1 130px; gap: 12px; min-height: 46px; }
+.playlist-controls button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.playlist-jump { display: flex; align-items: center; gap: 9px; color: #9d8caf; font: .58rem 'DM Mono',monospace; letter-spacing: .1em; }
+.playlist-jump select { min-height: 46px; padding: 0 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 10px; background: rgba(255,255,255,.04); color: white; font: 700 .7rem 'DM Mono',monospace; }
 .stage-footer { border-top: 1px solid var(--line); }
 .stage-footer span:last-child { color: var(--lime); font-size: .9rem; }
 .player-stage { padding-bottom: 16px; }

@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { getPlaylistVideos } from "./youtube";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  JUST_DANCE_PLAYLIST_ID,
+  PlayerState,
+  createPlaylistPlayer,
+  describePlayerError,
+  type YouTubePlayer,
+} from "./youtube";
 import "./App.css";
 
 type Screen = "auth" | "songs" | "dance" | "results";
@@ -25,7 +31,6 @@ type Generation = {
   description: string;
   accent: string;
   symbol: string;
-  playlistId: string;
 };
 
 const generations: Generation[] = [
@@ -36,7 +41,6 @@ const generations: Generation[] = [
     description: "Iconic moves. Legendary tracks.",
     accent: "#ff4e91",
     symbol: "✳",
-    playlistId: "PASTE_CLASSICS_PLAYLIST_ID",
   },
   {
     id: "golden",
@@ -45,7 +49,6 @@ const generations: Generation[] = [
     description: "The party never stopped.",
     accent: "#ffb52e",
     symbol: "✦",
-    playlistId: "PASTE_GOLDEN_ERA_PLAYLIST_ID",
   },
   {
     id: "modern",
@@ -54,7 +57,6 @@ const generations: Generation[] = [
     description: "Big hits. Bigger energy.",
     accent: "#37d9ee",
     symbol: "✺",
-    playlistId: "PASTE_MODERN_ERA_PLAYLIST_ID",
   },
   {
     id: "new",
@@ -63,7 +65,6 @@ const generations: Generation[] = [
     description: "Fresh beats, fresh moves.",
     accent: "#b18cff",
     symbol: "✷",
-    playlistId: "PASTE_NEW_ERA_PLAYLIST_ID",
   },
 ];
 const songs: Song[] = [
@@ -85,6 +86,211 @@ function getDifficultyClass(difficulty: Difficulty) {
   return difficulty.toLowerCase();
 }
 
+type PlaylistMeta = {
+  title: string;
+  author: string;
+  index: number;
+  count: number;
+};
+
+const emptyMeta: PlaylistMeta = { title: "", author: "", index: 0, count: 0 };
+
+/**
+ * Mounts a real YouTube IFrame player bound to the Just Dance playlist and
+ * drives it through the player API. No Data API key is used — titles, the
+ * current index and the playlist length are read back off the live player.
+ */
+function PlaylistStage({ accent }: { accent: string }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<YouTubePlayer | null>(null);
+  const [ready, setReady] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [meta, setMeta] = useState<PlaylistMeta>(emptyMeta);
+  const [error, setError] = useState("");
+
+  const readMeta = useCallback((player: YouTubePlayer) => {
+    const data = player.getVideoData();
+    setMeta({
+      title: data.title || "",
+      author: data.author || "",
+      index: player.getPlaylistIndex(),
+      count: player.getPlaylist()?.length ?? 0,
+    });
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    let cancelled = false;
+    let player: YouTubePlayer | null = null;
+
+    // The API replaces the element it is given with an iframe, so hand it a
+    // throwaway child and clear the host on teardown. That also means
+    // StrictMode's second effect run starts from an empty host instead of
+    // stacking a second iframe.
+    const mount = document.createElement("div");
+    host.replaceChildren(mount);
+
+    void createPlaylistPlayer(mount, {
+      width: "100%",
+      height: "100%",
+      playerVars: {
+        listType: "playlist",
+        list: JUST_DANCE_PLAYLIST_ID,
+        autoplay: 0,
+        rel: 0,
+        playsinline: 1,
+        origin: window.location.origin,
+      },
+      events: {
+        onReady: (event) => {
+          if (cancelled) return;
+          setReady(true);
+          setError("");
+          readMeta(event.target);
+        },
+        onStateChange: (event) => {
+          if (cancelled) return;
+          setPlaying(event.data === PlayerState.PLAYING);
+          if (event.data === PlayerState.PLAYING) setError("");
+          readMeta(event.target);
+        },
+        onError: (event) => {
+          if (cancelled) return;
+          setError(describePlayerError(event.data));
+          readMeta(event.target);
+        },
+      },
+    })
+      .then((created) => {
+        if (cancelled) {
+          created.destroy();
+          return;
+        }
+        player = created;
+        playerRef.current = created;
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "The YouTube player failed to load."
+        );
+      });
+
+    return () => {
+      cancelled = true;
+      player?.destroy();
+      playerRef.current = null;
+      host.replaceChildren();
+    };
+  }, [readMeta]);
+
+  function togglePlay() {
+    const player = playerRef.current;
+    if (!player) return;
+    if (player.getPlayerState() === PlayerState.PLAYING) player.pauseVideo();
+    else player.playVideo();
+  }
+
+  function goNext() {
+    setError("");
+    playerRef.current?.nextVideo();
+  }
+
+  function goPrevious() {
+    setError("");
+    playerRef.current?.previousVideo();
+  }
+
+  function jumpTo(index: number) {
+    setError("");
+    playerRef.current?.playVideoAt(index);
+  }
+
+  const positionLabel =
+    meta.count > 0
+      ? `TRACK ${String(meta.index + 1).padStart(2, "0")} / ${String(
+          meta.count
+        ).padStart(2, "0")}`
+      : "LOADING PLAYLIST…";
+
+  return (
+    <section className="video-stage" style={{ "--accent": accent } as React.CSSProperties}>
+      <div className="stage-topbar">
+        <span>
+          <span className="status-dot" /> COACH VIEW
+        </span>
+        <span>{positionLabel}</span>
+      </div>
+
+      <div className="dance-video-frame" ref={hostRef} />
+
+      {!ready && !error && (
+        <p className="playlist-status">Connecting to the YouTube playlist…</p>
+      )}
+
+      {error && (
+        <div className="playlist-player-error" role="alert">
+          <strong>CAN'T PLAY THIS TRACK</strong>
+          <p>{error}</p>
+          <button className="text-button" onClick={goNext}>
+            SKIP TO NEXT TRACK ↗
+          </button>
+        </div>
+      )}
+
+      <div className="playlist-now">
+        <span className="eyebrow small-eyebrow">NOW ON THE PLAYLIST</span>
+        <strong>{meta.title || "—"}</strong>
+        <span className="playlist-author">{meta.author || "YouTube"}</span>
+      </div>
+
+      <div className="playlist-controls">
+        <button
+          className="secondary-button"
+          onClick={goPrevious}
+          disabled={!ready}
+        >
+          PREVIOUS <span>⏮</span>
+        </button>
+        <button className="primary-button" onClick={togglePlay} disabled={!ready}>
+          {playing ? "PAUSE" : "PLAY"} <span>{playing ? "Ⅱ" : "▶"}</span>
+        </button>
+        <button className="secondary-button" onClick={goNext} disabled={!ready}>
+          NEXT <span>⏭</span>
+        </button>
+        <label className="playlist-jump">
+          JUMP TO
+          <select
+            value={meta.count > 0 ? meta.index : 0}
+            onChange={(event) => jumpTo(Number(event.target.value))}
+            disabled={meta.count === 0}
+            aria-label="Jump to playlist position"
+          >
+            {meta.count > 0 ? (
+              Array.from({ length: meta.count }, (_, position) => (
+                <option key={position} value={position}>
+                  {String(position + 1).padStart(2, "0")}
+                </option>
+              ))
+            ) : (
+              <option value={0}>—</option>
+            )}
+          </select>
+        </label>
+      </div>
+
+      <div className="stage-footer">
+        <span>MOVE WITH THE MUSIC</span>
+        <span>♪ ♫ ♪</span>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [screen, setScreen] = useState<Screen>("auth");
   const [isSignup, setIsSignup] = useState(false);
@@ -98,82 +304,11 @@ function App() {
   const [difficulty, setDifficulty] = useState("All");
   const [score, setScore] = useState(0);
   const [danceStarted, setDanceStarted] = useState(false);
-  const [playlistSongs, setPlaylistSongs] = useState<Song[]>([]);
-  const [playlistLoading, setPlaylistLoading] = useState(false);
-  const [playlistError, setPlaylistError] = useState("");
-
-  useEffect(() => {
-    const generation = generations.find(
-      (item) => item.id === selectedGeneration
-    );
-
-    // Keep demo tracks for generations without a configured playlist.
-    if (
-      !generation?.playlistId ||
-      generation.playlistId.startsWith("PASTE_")
-    ) {
-      setPlaylistSongs([]);
-      setPlaylistError("");
-      setPlaylistLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadPlaylist() {
-      setPlaylistLoading(true);
-      setPlaylistError("");
-
-      try {
-        const videos = await getPlaylistVideos(generation!.playlistId);
-
-        if (cancelled) return;
-
-        setPlaylistSongs(
-          videos.map((video) => ({
-            id: video.id,
-            title: video.title,
-            artist: video.channelTitle,
-            difficulty: "Medium",
-            duration: "—",
-            generation: selectedGeneration,
-            accent: generation!.accent,
-            label: "YOUTUBE PLAYLIST",
-            videoId: video.id,
-            thumbnail: video.thumbnail,
-          }))
-        );
-      } catch (error) {
-        if (cancelled) return;
-
-        setPlaylistSongs([]);
-        setPlaylistError(
-          error instanceof Error ? error.message : "Playlist loading failed."
-        );
-      } finally {
-        if (!cancelled) setPlaylistLoading(false);
-      }
-    }
-
-    void loadPlaylist();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedGeneration]);
 
   const visibleSongs = useMemo(() => {
-    const generation = generations.find(
-      (item) => item.id === selectedGeneration
+    const sourceSongs = songs.filter(
+      (song) => song.generation === selectedGeneration
     );
-
-    const hasPlaylist =
-      !!generation?.playlistId &&
-      !generation.playlistId.startsWith("PASTE_");
-
-    const sourceSongs = hasPlaylist
-      ? playlistSongs
-      : songs.filter((song) => song.generation === selectedGeneration);
 
     return sourceSongs.filter((song) => {
       const query = search.trim().toLowerCase();
@@ -187,12 +322,7 @@ function App() {
 
       return matchesSearch && matchesDifficulty;
     });
-  }, [
-    selectedGeneration,
-    playlistSongs,
-    search,
-    difficulty,
-  ]);
+  }, [selectedGeneration, search, difficulty]);
 
   function handleAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -370,7 +500,7 @@ function App() {
               <div className="empty-state"><span>✳</span><h3>NO TRACKS FOUND</h3><p>Try another search or difficulty.</p><button className="text-button" onClick={() => { setSearch(""); setDifficulty("All"); }}>CLEAR FILTERS ↗</button></div>
             )}
           </section>
-          <div className="playlist-note"><span className="note-icon">♫</span><span><strong>PLAYLISTS COMING NEXT</strong><br />This library is using demo tracks. Connect your generation-specific YouTube playlists when you're ready.</span></div>
+          <div className="playlist-note"><span className="note-icon">♫</span><span><strong>REAL PLAYLIST ON THE STAGE</strong><br />These cards are demo tracks, but every dance session streams the live Just Dance YouTube playlist — play, skip and jump between its videos from the stage.</span></div>
         </main>
       )}
 
@@ -385,19 +515,7 @@ function App() {
             <span className={`difficulty large-difficulty ${getDifficultyClass(selectedSong.difficulty)}`}>{selectedSong.difficulty}</span>
           </section>
           <div className="dance-layout">
-            <section className="video-stage">
-              <div className="stage-topbar"><span><span className="status-dot" /> COACH VIEW</span><span>DEMO STAGE 01</span></div>
-              {selectedSong.videoId ? (
-                <iframe className="dance-video" src={`https://www.youtube-nocookie.com/embed/${selectedSong.videoId}?autoplay=0&rel=0`} title={`${selectedSong.title} dance video`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
-              ) : (
-                <div className="video-placeholder" style={{ "--accent": selectedSong.accent } as React.CSSProperties}>
-                  <span className="placeholder-spark">✳</span><span className="placeholder-play">▶</span>
-                  <strong>YOUR DANCE VIDEO<br />GOES HERE</strong>
-                  <p>Add a YouTube video ID to this track to embed the coach video.</p>
-                </div>
-              )}
-              <div className="stage-footer"><span>MOVE WITH THE MUSIC</span><span>♪ ♫ ♪</span></div>
-            </section>
+            <PlaylistStage accent={selectedSong.accent} />
             <aside className="player-stage">
               <div className="player-stage-header"><span>PLAYER CAMERA</span><span className="camera-indicator">● OFFLINE</span></div>
               <div className="camera-placeholder"><div className="camera-frame"><span className="camera-cross">＋</span><span className="camera-person">♙</span></div><strong>YOUR SPOTLIGHT</strong><p>Webcam body tracking will appear here.</p></div>

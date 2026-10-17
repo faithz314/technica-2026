@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getPlaylistVideos } from "./youtube";
 import "./App.css";
 
 type Screen = "auth" | "songs" | "dance" | "results";
@@ -24,15 +25,47 @@ type Generation = {
   description: string;
   accent: string;
   symbol: string;
+  playlistId: string;
 };
 
 const generations: Generation[] = [
-  { id: "classics", title: "THE CLASSICS", years: "2009–2013", description: "Iconic moves. Legendary tracks.", accent: "#ff4e91", symbol: "✳" },
-  { id: "golden", title: "GOLDEN ERA", years: "2014–2018", description: "The party never stopped.", accent: "#ffb52e", symbol: "✦" },
-  { id: "modern", title: "MODERN ERA", years: "2019–2022", description: "Big hits. Bigger energy.", accent: "#37d9ee", symbol: "✺" },
-  { id: "new", title: "NEW SCHOOL", years: "2023–2026", description: "Fresh beats, fresh moves.", accent: "#b18cff", symbol: "✷" },
+  {
+    id: "classics",
+    title: "THE CLASSICS",
+    years: "2009–2013",
+    description: "Iconic moves. Legendary tracks.",
+    accent: "#ff4e91",
+    symbol: "✳",
+    playlistId: "PASTE_CLASSICS_PLAYLIST_ID",
+  },
+  {
+    id: "golden",
+    title: "GOLDEN ERA",
+    years: "2014–2018",
+    description: "The party never stopped.",
+    accent: "#ffb52e",
+    symbol: "✦",
+    playlistId: "PASTE_GOLDEN_ERA_PLAYLIST_ID",
+  },
+  {
+    id: "modern",
+    title: "MODERN ERA",
+    years: "2019–2022",
+    description: "Big hits. Bigger energy.",
+    accent: "#37d9ee",
+    symbol: "✺",
+    playlistId: "PASTE_MODERN_ERA_PLAYLIST_ID",
+  },
+  {
+    id: "new",
+    title: "NEW SCHOOL",
+    years: "2023–2026",
+    description: "Fresh beats, fresh moves.",
+    accent: "#b18cff",
+    symbol: "✷",
+    playlistId: "PASTE_NEW_ERA_PLAYLIST_ID",
+  },
 ];
-
 const songs: Song[] = [
   { id: "s1", title: "Neon Nights", artist: "The Electric Hearts", difficulty: "Easy", duration: "3:12", generation: "classics", accent: "#ff4e91", label: "PARTY STARTER", videoId: "" },
   { id: "s2", title: "Rhythm Riot", artist: "DJ Voltage", difficulty: "Hard", duration: "3:34", generation: "classics", accent: "#ff783d", label: "FAN FAVORITE", videoId: "" },
@@ -65,16 +98,101 @@ function App() {
   const [difficulty, setDifficulty] = useState("All");
   const [score, setScore] = useState(0);
   const [danceStarted, setDanceStarted] = useState(false);
+  const [playlistSongs, setPlaylistSongs] = useState<Song[]>([]);
+  const [playlistLoading, setPlaylistLoading] = useState(false);
+  const [playlistError, setPlaylistError] = useState("");
+
+  useEffect(() => {
+    const generation = generations.find(
+      (item) => item.id === selectedGeneration
+    );
+
+    // Keep demo tracks for generations without a configured playlist.
+    if (
+      !generation?.playlistId ||
+      generation.playlistId.startsWith("PASTE_")
+    ) {
+      setPlaylistSongs([]);
+      setPlaylistError("");
+      setPlaylistLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPlaylist() {
+      setPlaylistLoading(true);
+      setPlaylistError("");
+
+      try {
+        const videos = await getPlaylistVideos(generation!.playlistId);
+
+        if (cancelled) return;
+
+        setPlaylistSongs(
+          videos.map((video) => ({
+            id: video.id,
+            title: video.title,
+            artist: video.channelTitle,
+            difficulty: "Medium",
+            duration: "—",
+            generation: selectedGeneration,
+            accent: generation!.accent,
+            label: "YOUTUBE PLAYLIST",
+            videoId: video.id,
+            thumbnail: video.thumbnail,
+          }))
+        );
+      } catch (error) {
+        if (cancelled) return;
+
+        setPlaylistSongs([]);
+        setPlaylistError(
+          error instanceof Error ? error.message : "Playlist loading failed."
+        );
+      } finally {
+        if (!cancelled) setPlaylistLoading(false);
+      }
+    }
+
+    void loadPlaylist();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedGeneration]);
 
   const visibleSongs = useMemo(() => {
-    return songs.filter((song) => {
-      const matchesGeneration = song.generation === selectedGeneration;
+    const generation = generations.find(
+      (item) => item.id === selectedGeneration
+    );
+
+    const hasPlaylist =
+      !!generation?.playlistId &&
+      !generation.playlistId.startsWith("PASTE_");
+
+    const sourceSongs = hasPlaylist
+      ? playlistSongs
+      : songs.filter((song) => song.generation === selectedGeneration);
+
+    return sourceSongs.filter((song) => {
       const query = search.trim().toLowerCase();
-      const matchesSearch = !query || `${song.title} ${song.artist}`.toLowerCase().includes(query);
-      const matchesDifficulty = difficulty === "All" || song.difficulty === difficulty;
-      return matchesGeneration && matchesSearch && matchesDifficulty;
+
+      const matchesSearch =
+        !query ||
+        `${song.title} ${song.artist}`.toLowerCase().includes(query);
+
+      const matchesDifficulty =
+        difficulty === "All" || song.difficulty === difficulty;
+
+      return matchesSearch && matchesDifficulty;
     });
-  }, [selectedGeneration, search, difficulty]);
+  }, [
+    selectedGeneration,
+    playlistSongs,
+    search,
+    difficulty,
+  ]);
 
   function handleAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -225,6 +343,14 @@ function App() {
                 {visibleSongs.map((song, index) => (
                   <button key={song.id} className="song-card" onClick={() => startDance(song)} style={{ "--accent": song.accent } as React.CSSProperties}>
                     <div className="song-art">
+                      {song.thumbnail && (
+                        <img
+                          className="youtube-thumbnail"
+                          src={song.thumbnail}
+                          alt=""
+                          loading="lazy"
+                        />
+                      )}
                       <span className="song-index">TRACK {String(index + 1).padStart(2, "0")}</span>
                       <span className="song-art-shape shape-one" />
                       <span className="song-art-shape shape-two" />

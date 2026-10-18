@@ -2,12 +2,9 @@
  * Thin, typed wrapper around the YouTube IFrame Player API.
  *
  * No YouTube Data API key is involved: the iframe player can load a whole
- * playlist by id, and every bit of metadata the UI needs (titles, playlist
- * length, current index) is read back off the player at runtime.
+ * playlist by id and report its video ids, and the dance stage reads the
+ * playback position straight off the player to time-align pose scoring.
  */
-
-/** Playlist backing the dance stage. Swap this to point at another playlist. */
-export const JUST_DANCE_PLAYLIST_ID = "PLpy_XRdn544o8FwsRScNgejcGMWLyXXqB";
 
 const IFRAME_API_SRC = "https://www.youtube.com/iframe_api";
 const SCRIPT_ID = "youtube-iframe-api";
@@ -38,6 +35,12 @@ export type YouTubePlayer = {
   getPlaylistIndex(): number;
   getVideoData(): YouTubeVideoData;
   getPlayerState(): number;
+  /** Seconds into the current video. */
+  getCurrentTime(): number;
+  /** Seconds; 0 until the video's metadata has loaded. */
+  getDuration(): number;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+  cueVideoById(videoId: string): void;
   getIframe(): HTMLIFrameElement;
   destroy(): void;
 };
@@ -54,6 +57,9 @@ export type YouTubePlayerOptions = {
     list?: string;
     autoplay?: 0 | 1;
     controls?: 0 | 1;
+    disablekb?: 0 | 1;
+    fs?: 0 | 1;
+    iv_load_policy?: 1 | 3;
     rel?: 0 | 1;
     modestbranding?: 0 | 1;
     playsinline?: 0 | 1;
@@ -140,7 +146,7 @@ export function loadYouTubeIframeApi(): Promise<YouTubeNamespace> {
  * player never becomes ready (for example when the first playlist item is
  * unavailable). Use `options.events.onReady` to know when commands are safe.
  */
-export async function createPlaylistPlayer(
+export async function createPlayer(
   container: HTMLElement,
   options: YouTubePlayerOptions
 ): Promise<YouTubePlayer> {
